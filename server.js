@@ -36,6 +36,7 @@ function tokenFor(user) {
 function auth(req, res, next) {
   try {
     const header = req.headers.authorization || "";
+
     const token = header.startsWith("Bearer ")
       ? header.slice(7)
       : null;
@@ -202,28 +203,9 @@ app.post("/api/chat", async (req, res) => {
     }
 
     const response = await fetch(
-  "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent",
-  {
-    method: "POST",
-
-    headers: {
-      "Content-Type": "application/json",
-      "x-goog-api-key": apiKey
-    },
-
-    body: JSON.stringify({
-      contents: [
-        {
-          parts: [
-            {
-              text: message
-            }
-          ]
-        }
-      ]
-    })
-  }
-);
+      "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent",
+      {
+        method: "POST",
 
         headers: {
           "Content-Type": "application/json",

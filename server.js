@@ -182,7 +182,7 @@ Rules:
 /*
 ====================================================
  IMAGE GENERATOR - AI HORDE
- FREE COMMUNITY IMAGE GENERATION
+ FREE / ANONYMOUS MODE
 ====================================================
 */
 
@@ -198,7 +198,10 @@ app.post("/api/generate-image", async (req, res) => {
     }
 
     /*
-    AI Horde anonymous key.
+    --------------------------------------------------
+    AI HORDE ANONYMOUS ACCESS
+    --------------------------------------------------
+
     किसी personal API key की जरूरत नहीं।
     */
 
@@ -206,9 +209,11 @@ app.post("/api/generate-image", async (req, res) => {
 
     /*
     --------------------------------------------------
-    STEP 1
-    Image generation request
+    IMAGE GENERATION REQUEST
     --------------------------------------------------
+
+    छोटी image + कम steps रखे गए हैं ताकि
+    anonymous request हल्की रहे।
     */
 
     const generateResponse = await fetch(
@@ -226,9 +231,9 @@ app.post("/api/generate-image", async (req, res) => {
           prompt: prompt,
 
           params: {
-            width: 1024,
-            height: 1024,
-            steps: 25,
+            width: 512,
+            height: 512,
+            steps: 15,
             cfg_scale: 7,
             n: 1,
           },
@@ -247,7 +252,18 @@ app.post("/api/generate-image", async (req, res) => {
       generateData
     );
 
+    /*
+    --------------------------------------------------
+    HORDE ERROR
+    --------------------------------------------------
+    */
+
     if (!generateResponse.ok) {
+      console.error(
+        "AI Horde Request Failed:",
+        generateData
+      );
+
       return res.status(generateResponse.status).json({
         ok: false,
         error:
@@ -257,20 +273,33 @@ app.post("/api/generate-image", async (req, res) => {
       });
     }
 
+    /*
+    --------------------------------------------------
+    GENERATION ID
+    --------------------------------------------------
+    */
+
     const generationId = generateData?.id;
 
     if (!generationId) {
       return res.status(500).json({
         ok: false,
-        error: "AI Horde ने generation ID नहीं दिया।",
+        error:
+          "AI Horde ने generation ID नहीं दिया।",
       });
     }
 
+    console.log(
+      "AI Horde Generation ID:",
+      generationId
+    );
+
     /*
     --------------------------------------------------
-    STEP 2
-    Generation status check
+    CHECK GENERATION STATUS
     --------------------------------------------------
+
+    Maximum लगभग 3 मिनट।
     */
 
     const maxAttempts = 36;
@@ -283,12 +312,16 @@ app.post("/api/generate-image", async (req, res) => {
       attempt++
     ) {
       /*
-      हर 5 सेकंड में status check
+      5 seconds wait
       */
 
       await new Promise((resolve) =>
         setTimeout(resolve, 5000)
       );
+
+      /*
+      Status request
+      */
 
       const statusResponse = await fetch(
         `https://stablehorde.net/api/v2/generate/status/${generationId}`,
@@ -302,7 +335,8 @@ app.post("/api/generate-image", async (req, res) => {
         }
       );
 
-      const statusData = await statusResponse.json();
+      const statusData =
+        await statusResponse.json();
 
       console.log(
         `AI Horde Status ${attempt + 1}:`,
@@ -313,6 +347,10 @@ app.post("/api/generate-image", async (req, res) => {
         }
       );
 
+      /*
+      Status request failed
+      */
+
       if (!statusResponse.ok) {
         return res.status(500).json({
           ok: false,
@@ -320,6 +358,10 @@ app.post("/api/generate-image", async (req, res) => {
             "Image generation status नहीं मिल पाया।",
         });
       }
+
+      /*
+      Generation complete
+      */
 
       if (statusData?.done === true) {
         finalData = statusData;
@@ -329,8 +371,7 @@ app.post("/api/generate-image", async (req, res) => {
 
     /*
     --------------------------------------------------
-    STEP 3
-    Timeout
+    TIMEOUT
     --------------------------------------------------
     */
 
@@ -344,8 +385,7 @@ app.post("/api/generate-image", async (req, res) => {
 
     /*
     --------------------------------------------------
-    STEP 4
-    Get generated image
+    GET GENERATED IMAGE
     --------------------------------------------------
     */
 
@@ -361,38 +401,60 @@ app.post("/api/generate-image", async (req, res) => {
     }
 
     /*
-    AI Horde generated image URL
+    --------------------------------------------------
+    IMAGE URL
+    --------------------------------------------------
     */
 
     if (generation.img) {
       try {
+        /*
+        AI Horde image download
+        */
+
         const imageResponse = await fetch(
           generation.img
         );
 
-        if (!imageResponse.ok) {
-          /*
-          अगर backend image download नहीं कर पाया,
-          तो direct image URL भेज देंगे।
-          */
+        /*
+        अगर image download नहीं हुई
+        तो direct URL भेज देंगे।
+        */
 
+        if (!imageResponse.ok) {
           return res.json({
             ok: true,
             image: generation.img,
           });
         }
 
+        /*
+        Content type
+        */
+
         const contentType =
           imageResponse.headers.get(
             "content-type"
           ) || "image/png";
 
+        /*
+        Image buffer
+        */
+
         const imageBuffer = Buffer.from(
           await imageResponse.arrayBuffer()
         );
 
+        /*
+        Base64 image
+        */
+
         const base64Image =
           imageBuffer.toString("base64");
+
+        /*
+        Final response
+        */
 
         return res.json({
           ok: true,
@@ -406,6 +468,10 @@ app.post("/api/generate-image", async (req, res) => {
           downloadError
         );
 
+        /*
+        Direct image URL fallback
+        */
+
         return res.json({
           ok: true,
           image: generation.img,
@@ -415,15 +481,22 @@ app.post("/api/generate-image", async (req, res) => {
 
     /*
     --------------------------------------------------
-    NO IMAGE
+    IMAGE URL NOT FOUND
     --------------------------------------------------
     */
 
     return res.status(500).json({
       ok: false,
-      error: "Generated image URL नहीं मिला।",
+      error:
+        "Generated image URL नहीं मिला।",
     });
   } catch (error) {
+    /*
+    --------------------------------------------------
+    GENERAL IMAGE ERROR
+    --------------------------------------------------
+    */
+
     console.error(
       "Image Generation Error:",
       error

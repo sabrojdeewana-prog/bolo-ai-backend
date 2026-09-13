@@ -45,7 +45,7 @@ app.get("/api/me",auth,(req,res)=>{
 
 app.get("/api/settings",(req,res)=>res.json(settings));
 
-app.post("/api/chat",auth,async(req,res)=>{
+app.post("/api/chat",async(req,res)=>{
   const message=String(req.body?.message||"").trim();
   if(!message)return res.status(400).json({error:"Message required"});
   // IMPORTANT: Do not expose AI_API_KEY in browser. Put provider call here on the server.

@@ -198,22 +198,16 @@ app.post("/api/generate-image", async (req, res) => {
     }
 
     /*
-    --------------------------------------------------
-    AI HORDE ANONYMOUS ACCESS
-    --------------------------------------------------
-
-    किसी personal API key की जरूरत नहीं।
+    AI Horde anonymous API key.
+    किसी personal image API key की जरूरत नहीं।
     */
 
     const HORDE_API_KEY = "0000000000";
 
     /*
     --------------------------------------------------
-    IMAGE GENERATION REQUEST
+    STEP 1: CREATE IMAGE REQUEST
     --------------------------------------------------
-
-    छोटी image + कम steps रखे गए हैं ताकि
-    anonymous request हल्की रहे।
     */
 
     const generateResponse = await fetch(
@@ -252,15 +246,9 @@ app.post("/api/generate-image", async (req, res) => {
       generateData
     );
 
-    /*
-    --------------------------------------------------
-    HORDE ERROR
-    --------------------------------------------------
-    */
-
     if (!generateResponse.ok) {
       console.error(
-        "AI Horde Request Failed:",
+        "AI Horde Generate Error:",
         generateData
       );
 
@@ -272,12 +260,6 @@ app.post("/api/generate-image", async (req, res) => {
           "AI Horde image request failed.",
       });
     }
-
-    /*
-    --------------------------------------------------
-    GENERATION ID
-    --------------------------------------------------
-    */
 
     const generationId = generateData?.id;
 
@@ -296,15 +278,18 @@ app.post("/api/generate-image", async (req, res) => {
 
     /*
     --------------------------------------------------
-    CHECK GENERATION STATUS
+    STEP 2: CHECK GENERATION
     --------------------------------------------------
 
-    Maximum लगभग 3 मिनट।
+    Official lightweight check endpoint.
+    इसमें image download नहीं होती।
     */
 
     const maxAttempts = 36;
 
-    let finalData = null;
+    let isDone = false;
+
+    let lastCheckData = null;
 
     for (
       let attempt = 0;
@@ -319,12 +304,8 @@ app.post("/api/generate-image", async (req, res) => {
         setTimeout(resolve, 5000)
       );
 
-      /*
-      Status request
-      */
-
-      const statusResponse = await fetch(
-        `https://stablehorde.net/api/v2/generate/status/${generationId}`,
+      const checkResponse = await fetch(
+        `https://stablehorde.net/api/v2/generate/check/${generationId}`,
         {
           method: "GET",
 
@@ -335,26 +316,27 @@ app.post("/api/generate-image", async (req, res) => {
         }
       );
 
-      const statusData =
-        await statusResponse.json();
+      const checkData =
+        await checkResponse.json();
+
+      lastCheckData = checkData;
 
       console.log(
-        `AI Horde Status ${attempt + 1}:`,
-        {
-          done: statusData?.done,
-          waiting: statusData?.waiting,
-          processing: statusData?.processing,
-        }
+        `AI Horde Check ${attempt + 1}:`,
+        checkData
       );
 
-      /*
-      Status request failed
-      */
+      if (!checkResponse.ok) {
+        console.error(
+          "AI Horde Check Error:",
+          checkData
+        );
 
-      if (!statusResponse.ok) {
         return res.status(500).json({
           ok: false,
           error:
+            checkData?.message ||
+            checkData?.error ||
             "Image generation status नहीं मिल पाया।",
         });
       }
@@ -363,34 +345,73 @@ app.post("/api/generate-image", async (req, res) => {
       Generation complete
       */
 
-      if (statusData?.done === true) {
-        finalData = statusData;
+      if (checkData?.done === true) {
+        isDone = true;
         break;
       }
     }
 
     /*
     --------------------------------------------------
-    TIMEOUT
+    STEP 3: TIMEOUT
     --------------------------------------------------
     */
 
-    if (!finalData) {
+    if (!isDone) {
       return res.status(504).json({
         ok: false,
         error:
           "Image generation में ज्यादा समय लग रहा है। AI Horde अभी busy है, थोड़ी देर बाद फिर कोशिश करें।",
+        status: lastCheckData,
       });
     }
 
     /*
     --------------------------------------------------
-    GET GENERATED IMAGE
+    STEP 4: GET FULL GENERATION STATUS
+    --------------------------------------------------
+
+    अब image सहित पूरा result लेते हैं।
+    */
+
+    const statusResponse = await fetch(
+      `https://stablehorde.net/api/v2/generate/status/${generationId}`,
+      {
+        method: "GET",
+
+        headers: {
+          apikey: HORDE_API_KEY,
+          Accept: "application/json",
+        },
+      }
+    );
+
+    const statusData =
+      await statusResponse.json();
+
+    console.log(
+      "AI Horde Final Status:",
+      statusData
+    );
+
+    if (!statusResponse.ok) {
+      return res.status(500).json({
+        ok: false,
+        error:
+          statusData?.message ||
+          statusData?.error ||
+          "Generated image status नहीं मिल पाया।",
+      });
+    }
+
+    /*
+    --------------------------------------------------
+    STEP 5: GET IMAGE
     --------------------------------------------------
     */
 
     const generation =
-      finalData?.generations?.[0];
+      statusData?.generations?.[0];
 
     if (!generation) {
       return res.status(500).json({
@@ -400,103 +421,85 @@ app.post("/api/generate-image", async (req, res) => {
       });
     }
 
+    if (!generation.img) {
+      return res.status(500).json({
+        ok: false,
+        error:
+          "AI Horde ने image URL नहीं दिया।",
+      });
+    }
+
     /*
     --------------------------------------------------
-    IMAGE URL
+    STEP 6: DOWNLOAD IMAGE
     --------------------------------------------------
     */
 
-    if (generation.img) {
-      try {
-        /*
-        AI Horde image download
-        */
+    try {
+      const imageResponse = await fetch(
+        generation.img
+      );
 
-        const imageResponse = await fetch(
-          generation.img
-        );
+      /*
+      अगर image download नहीं हुई,
+      तो direct URL भेज देंगे।
+      */
 
-        /*
-        अगर image download नहीं हुई
-        तो direct URL भेज देंगे।
-        */
-
-        if (!imageResponse.ok) {
-          return res.json({
-            ok: true,
-            image: generation.img,
-          });
-        }
-
-        /*
-        Content type
-        */
-
-        const contentType =
-          imageResponse.headers.get(
-            "content-type"
-          ) || "image/png";
-
-        /*
-        Image buffer
-        */
-
-        const imageBuffer = Buffer.from(
-          await imageResponse.arrayBuffer()
-        );
-
-        /*
-        Base64 image
-        */
-
-        const base64Image =
-          imageBuffer.toString("base64");
-
-        /*
-        Final response
-        */
-
-        return res.json({
-          ok: true,
-
-          image:
-            `data:${contentType};base64,${base64Image}`,
-        });
-      } catch (downloadError) {
+      if (!imageResponse.ok) {
         console.error(
-          "Image Download Error:",
-          downloadError
+          "Image download failed:",
+          imageResponse.status
         );
-
-        /*
-        Direct image URL fallback
-        */
 
         return res.json({
           ok: true,
           image: generation.img,
         });
       }
+
+      const contentType =
+        imageResponse.headers.get(
+          "content-type"
+        ) || "image/png";
+
+      const imageBuffer = Buffer.from(
+        await imageResponse.arrayBuffer()
+      );
+
+      const base64Image =
+        imageBuffer.toString("base64");
+
+      /*
+      ------------------------------------------------
+      FINAL SUCCESS
+      ------------------------------------------------
+      */
+
+      return res.json({
+        ok: true,
+
+        image:
+          `data:${contentType};base64,${base64Image}`,
+
+        width: 512,
+        height: 512,
+      });
+    } catch (downloadError) {
+      console.error(
+        "Image Download Error:",
+        downloadError
+      );
+
+      /*
+      Direct URL fallback
+      */
+
+      return res.json({
+        ok: true,
+        image: generation.img,
+      });
     }
-
-    /*
-    --------------------------------------------------
-    IMAGE URL NOT FOUND
-    --------------------------------------------------
-    */
-
-    return res.status(500).json({
-      ok: false,
-      error:
-        "Generated image URL नहीं मिला।",
-    });
   } catch (error) {
-    /*
-    --------------------------------------------------
-    GENERAL IMAGE ERROR
-    --------------------------------------------------
-    */
-
     console.error(
       "Image Generation Error:",
       error

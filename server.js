@@ -6,54 +6,63 @@ import dotenv from "dotenv";
 dotenv.config();
 
 const app = express();
-
 const PORT = process.env.PORT || 10000;
 
-const GROQ_API_KEY = process.env.GROQ_API_KEY;
-const POLLINATIONS_API_KEY = process.env.POLLINATIONS_API_KEY;
+/*
+====================================================
+ BOLO AI BACKEND
+ Owner: Sabroj Babu
+====================================================
+*/
 
 app.use(
   cors({
     origin: [
       "https://bolo-ai-five.vercel.app",
       "http://localhost:3000",
-      "http://localhost:5173"
+      "http://localhost:5173",
     ],
     methods: ["GET", "POST", "OPTIONS"],
-    allowedHeaders: ["Content-Type"]
+    allowedHeaders: ["Content-Type"],
   })
 );
 
 app.use(express.json({ limit: "2mb" }));
 
-// ========================================
-// HOME
-// ========================================
+/*
+====================================================
+ ROOT
+====================================================
+*/
 
 app.get("/", (req, res) => {
   res.json({
     ok: true,
     service: "Bolo AI Backend",
     owner: "Sabroj Babu",
-    message: "Bolo AI Backend is running"
+    message: "Bolo AI Backend is running",
   });
 });
 
-// ========================================
-// HEALTH
-// ========================================
+/*
+====================================================
+ HEALTH
+====================================================
+*/
 
 app.get("/api/health", (req, res) => {
   res.json({
     ok: true,
     service: "Bolo AI Backend",
-    owner: "Sabroj Babu"
+    owner: "Sabroj Babu",
   });
 });
 
-// ========================================
-// CHAT - GROQ
-// ========================================
+/*
+====================================================
+ CHAT - GROQ
+====================================================
+*/
 
 app.post("/api/chat", async (req, res) => {
   try {
@@ -62,20 +71,18 @@ app.post("/api/chat", async (req, res) => {
     if (!message) {
       return res.status(400).json({
         ok: false,
-        error: "Message खाली है।"
+        error: "Message खाली है।",
       });
     }
+
+    const GROQ_API_KEY = process.env.GROQ_API_KEY;
 
     if (!GROQ_API_KEY) {
-      console.error("GROQ_API_KEY is missing.");
-
       return res.status(500).json({
         ok: false,
-        error: "AI service अभी configure नहीं है।"
+        error: "AI service अभी configure नहीं है।",
       });
     }
-
-    console.log("User message:", message);
 
     const response = await fetch(
       "https://api.groq.com/openai/v1/chat/completions",
@@ -83,7 +90,7 @@ app.post("/api/chat", async (req, res) => {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "Authorization": `Bearer ${GROQ_API_KEY}`
+          Authorization: `Bearer ${GROQ_API_KEY}`,
         },
         body: JSON.stringify({
           model: "openai/gpt-oss-20b",
@@ -105,29 +112,27 @@ Rules:
 - Be friendly and conversational.
 - Do not reveal API keys, passwords, server secrets or internal configuration.
 - If you do not know something, say so honestly.
-`
+              `,
             },
             {
               role: "user",
-              content: message
-            }
+              content: message,
+            },
           ],
 
           temperature: 0.7,
-          max_tokens: 1000
-        })
+          max_tokens: 1000,
+        }),
       }
     );
 
     const data = await response.json();
 
     if (!response.ok) {
-      console.error("Groq API error:", data);
-
       if (response.status === 401) {
         return res.status(500).json({
           ok: false,
-          error: "AI API key गलत है।"
+          error: "AI API key गलत है।",
         });
       }
 
@@ -135,47 +140,45 @@ Rules:
         return res.status(429).json({
           ok: false,
           error:
-            "AI की free limit अभी पूरी हो गई है। थोड़ी देर बाद फिर कोशिश करें।"
+            "AI की free limit अभी पूरी हो गई है। थोड़ी देर बाद फिर कोशिश करें।",
         });
       }
 
       return res.status(500).json({
         ok: false,
-        error: "AI से response नहीं मिला।"
+        error: "AI से response नहीं मिला।",
       });
     }
 
     const reply = data?.choices?.[0]?.message?.content?.trim();
 
     if (!reply) {
-      console.error("Empty AI response:", data);
-
       return res.status(500).json({
         ok: false,
-        error: "AI ने कोई जवाब नहीं दिया।"
+        error: "AI ने कोई जवाब नहीं दिया।",
       });
     }
 
-    console.log("AI reply generated successfully.");
-
     return res.json({
       ok: true,
-      reply: reply
+      reply,
     });
-
   } catch (error) {
-    console.error("Chat server error:", error);
+    console.error("Chat Error:", error);
 
     return res.status(500).json({
       ok: false,
-      error: "AI server से connection नहीं हो पाया।"
+      error: "AI server से connection नहीं हो पाया।",
     });
   }
 });
 
-// ========================================
-// IMAGE GENERATION - POLLINATIONS
-// ========================================
+/*
+====================================================
+ IMAGE GENERATOR - AI HORDE
+ FREE COMMUNITY POWERED IMAGE GENERATION
+====================================================
+*/
 
 app.post("/api/generate-image", async (req, res) => {
   try {
@@ -184,107 +187,188 @@ app.post("/api/generate-image", async (req, res) => {
     if (!prompt) {
       return res.status(400).json({
         ok: false,
-        error: "Image prompt खाली है।"
+        error: "Image prompt खाली है।",
       });
     }
 
-    if (!POLLINATIONS_API_KEY) {
-      console.error("POLLINATIONS_API_KEY is missing.");
+    /*
+      AI Horde anonymous API key.
+      इसमें किसी payment/API key की जरूरत नहीं।
+    */
+    const HORDE_API_KEY = "0000000000";
 
-      return res.status(500).json({
-        ok: false,
-        error: "Image AI अभी configure नहीं है।"
-      });
-    }
+    /*
+      Image generation request
+    */
+    const generateResponse = await fetch(
+      "https://stablehorde.net/api/v2/generate/async",
+      {
+        method: "POST",
 
-    console.log("Image prompt:", prompt);
+        headers: {
+          "Content-Type": "application/json",
+          apikey: HORDE_API_KEY,
+          Accept: "application/json",
+        },
 
-    const model = "black-forest-labs/flux.1-schnell";
+        body: JSON.stringify({
+          prompt: prompt,
 
-    const width = 1024;
-    const height = 1024;
+          params: {
+            width: 1024,
+            height: 1024,
+            steps: 25,
+            cfg_scale: 7,
+            sampler_name: "k_euler",
+            n: 1,
+          },
 
-    const imageUrl =
-      `https://gen.pollinations.ai/image/${encodeURIComponent(prompt)}` +
-      `?model=${encodeURIComponent(model)}` +
-      `&width=${width}` +
-      `&height=${height}` +
-      `&safe=true`;
+          models: [
+            "Deliberate",
+            "AlbedoBase XL",
+            "Juggernaut XL",
+          ],
 
-    const response = await fetch(imageUrl, {
-      method: "GET",
-      headers: {
-        "Authorization": `Bearer ${POLLINATIONS_API_KEY}`,
-        "Accept": "image/*"
+          r2: true,
+          nsfw: false,
+        }),
       }
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-
-      console.error(
-        "Pollinations image error:",
-        response.status,
-        errorText
-      );
-
-      if (response.status === 401) {
-        return res.status(500).json({
-          ok: false,
-          error: "Pollinations API key गलत या unauthorized है।"
-        });
-      }
-
-      if (response.status === 402) {
-        return res.status(402).json({
-          ok: false,
-          error:
-            "Image generation के लिए available Pollen balance/credits पर्याप्त नहीं हैं।"
-        });
-      }
-
-      if (response.status === 429) {
-        return res.status(429).json({
-          ok: false,
-          error:
-            "Image generation की limit अभी पूरी हो गई है। थोड़ी देर बाद फिर कोशिश करें।"
-        });
-      }
-
-      return res.status(500).json({
-        ok: false,
-        error: "Image generate नहीं हो पाई।"
-      });
-    }
-
-    const contentType =
-      response.headers.get("content-type") || "image/png";
-
-    const imageBuffer = Buffer.from(
-      await response.arrayBuffer()
     );
 
-    console.log("Image generated successfully.");
+    const generateData = await generateResponse.json();
 
-    return res.json({
-      ok: true,
-      image: `data:${contentType};base64,${imageBuffer.toString("base64")}`
-    });
+    console.log("AI Horde Generate Response:", generateData);
 
-  } catch (error) {
-    console.error("Image generation server error:", error);
+    if (!generateResponse.ok) {
+      return res.status(generateResponse.status).json({
+        ok: false,
+        error:
+          generateData?.message ||
+          generateData?.error ||
+          "AI Horde image request failed.",
+      });
+    }
+
+    const generationId = generateData?.id;
+
+    if (!generationId) {
+      return res.status(500).json({
+        ok: false,
+        error: "AI Horde ने generation ID नहीं दिया।",
+      });
+    }
+
+    /*
+      Poll generation status.
+      Maximum लगभग 3 minutes.
+    */
+
+    const maxAttempts = 36;
+    let finalData = null;
+
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      await new Promise((resolve) => setTimeout(resolve, 5000));
+
+      const statusResponse = await fetch(
+        `https://stablehorde.net/api/v2/generate/status/${generationId}`,
+        {
+          method: "GET",
+          headers: {
+            apikey: HORDE_API_KEY,
+            Accept: "application/json",
+          },
+        }
+      );
+
+      const statusData = await statusResponse.json();
+
+      console.log(
+        `AI Horde Status ${attempt + 1}:`,
+        statusData?.done,
+        statusData?.waiting,
+        statusData?.processing
+      );
+
+      if (!statusResponse.ok) {
+        return res.status(500).json({
+          ok: false,
+          error: "Image generation status नहीं मिल पाया।",
+        });
+      }
+
+      if (statusData?.done === true) {
+        finalData = statusData;
+        break;
+      }
+    }
+
+    if (!finalData) {
+      return res.status(504).json({
+        ok: false,
+        error:
+          "Image generation में ज्यादा समय लग रहा है। AI Horde अभी busy है, थोड़ी देर बाद फिर कोशिश करें।",
+      });
+    }
+
+    /*
+      Image URL निकालना
+    */
+
+    const generation = finalData?.generations?.[0];
+
+    if (!generation) {
+      return res.status(500).json({
+        ok: false,
+        error:
+          "AI Horde ने generation complete बताया लेकिन image नहीं मिली।",
+      });
+    }
+
+    /*
+      AI Horde आमतौर पर img URL देता है।
+    */
+
+    if (generation.img) {
+      try {
+        const imageResponse = await fetch(generation.img);
+
+        if (!imageResponse.ok) {
+          return res.json({
+            ok: true,
+            image: generation.img,
+          });
+        }
+
+        const contentType =
+          imageResponse.headers.get("content-type") || "image/png";
+
+        const imageBuffer = Buffer.from(
+          await imageResponse.arrayBuffer()
+        );
+
+        return res.json({
+          ok: true,
+          image: `data:${contentType};base64,${imageBuffer.toString(
+            "base64"
+          )}`,
+        });
+      } catch (downloadError) {
+        console.error("Image Download Error:", downloadError);
+
+        /*
+          अगर backend image download नहीं कर पाए,
+          तो direct URL frontend को दे देते हैं।
+        */
+
+        return res.json({
+          ok: true,
+          image: generation.img,
+        });
+      }
+    }
 
     return res.status(500).json({
       ok: false,
-      error: "Image AI server से connection नहीं हो पाया।"
+      error: "Generated image URL नहीं मिला।",
     });
   }
-});
-
-// ========================================
-// START SERVER
-// ========================================
-
-app.listen(PORT, () => {
-  console.log(`Bolo AI backend running on port ${PORT}`);
-});

@@ -46,7 +46,7 @@ app.get("/", (req, res) => {
 
 /*
 ====================================================
- HEALTH
+ HEALTH CHECK
 ====================================================
 */
 
@@ -88,10 +88,12 @@ app.post("/api/chat", async (req, res) => {
       "https://api.groq.com/openai/v1/chat/completions",
       {
         method: "POST",
+
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${GROQ_API_KEY}`,
         },
+
         body: JSON.stringify({
           model: "openai/gpt-oss-20b",
 
@@ -114,6 +116,7 @@ Rules:
 - If you do not know something, say so honestly.
               `,
             },
+
             {
               role: "user",
               content: message,
@@ -144,13 +147,16 @@ Rules:
         });
       }
 
+      console.error("Groq Error:", data);
+
       return res.status(500).json({
         ok: false,
         error: "AI से response नहीं मिला।",
       });
     }
 
-    const reply = data?.choices?.[0]?.message?.content?.trim();
+    const reply =
+      data?.choices?.[0]?.message?.content?.trim();
 
     if (!reply) {
       return res.status(500).json({
@@ -176,7 +182,7 @@ Rules:
 /*
 ====================================================
  IMAGE GENERATOR - AI HORDE
- FREE COMMUNITY POWERED IMAGE GENERATION
+ FREE COMMUNITY IMAGE GENERATION
 ====================================================
 */
 
@@ -192,14 +198,19 @@ app.post("/api/generate-image", async (req, res) => {
     }
 
     /*
-      AI Horde anonymous API key.
-      इसमें किसी payment/API key की जरूरत नहीं।
+    AI Horde anonymous key.
+    किसी personal API key की जरूरत नहीं।
     */
+
     const HORDE_API_KEY = "0000000000";
 
     /*
-      Image generation request
+    --------------------------------------------------
+    STEP 1
+    Image generation request
+    --------------------------------------------------
     */
+
     const generateResponse = await fetch(
       "https://stablehorde.net/api/v2/generate/async",
       {
@@ -219,25 +230,22 @@ app.post("/api/generate-image", async (req, res) => {
             height: 1024,
             steps: 25,
             cfg_scale: 7,
-            sampler_name: "k_euler",
             n: 1,
           },
 
-          models: [
-            "Deliberate",
-            "AlbedoBase XL",
-            "Juggernaut XL",
-          ],
+          nsfw: false,
 
           r2: true,
-          nsfw: false,
         }),
       }
     );
 
     const generateData = await generateResponse.json();
 
-    console.log("AI Horde Generate Response:", generateData);
+    console.log(
+      "AI Horde Generate Response:",
+      generateData
+    );
 
     if (!generateResponse.ok) {
       return res.status(generateResponse.status).json({
@@ -259,20 +267,34 @@ app.post("/api/generate-image", async (req, res) => {
     }
 
     /*
-      Poll generation status.
-      Maximum लगभग 3 minutes.
+    --------------------------------------------------
+    STEP 2
+    Generation status check
+    --------------------------------------------------
     */
 
     const maxAttempts = 36;
+
     let finalData = null;
 
-    for (let attempt = 0; attempt < maxAttempts; attempt++) {
-      await new Promise((resolve) => setTimeout(resolve, 5000));
+    for (
+      let attempt = 0;
+      attempt < maxAttempts;
+      attempt++
+    ) {
+      /*
+      हर 5 सेकंड में status check
+      */
+
+      await new Promise((resolve) =>
+        setTimeout(resolve, 5000)
+      );
 
       const statusResponse = await fetch(
         `https://stablehorde.net/api/v2/generate/status/${generationId}`,
         {
           method: "GET",
+
           headers: {
             apikey: HORDE_API_KEY,
             Accept: "application/json",
@@ -284,15 +306,18 @@ app.post("/api/generate-image", async (req, res) => {
 
       console.log(
         `AI Horde Status ${attempt + 1}:`,
-        statusData?.done,
-        statusData?.waiting,
-        statusData?.processing
+        {
+          done: statusData?.done,
+          waiting: statusData?.waiting,
+          processing: statusData?.processing,
+        }
       );
 
       if (!statusResponse.ok) {
         return res.status(500).json({
           ok: false,
-          error: "Image generation status नहीं मिल पाया।",
+          error:
+            "Image generation status नहीं मिल पाया।",
         });
       }
 
@@ -301,6 +326,13 @@ app.post("/api/generate-image", async (req, res) => {
         break;
       }
     }
+
+    /*
+    --------------------------------------------------
+    STEP 3
+    Timeout
+    --------------------------------------------------
+    */
 
     if (!finalData) {
       return res.status(504).json({
@@ -311,10 +343,14 @@ app.post("/api/generate-image", async (req, res) => {
     }
 
     /*
-      Image URL निकालना
+    --------------------------------------------------
+    STEP 4
+    Get generated image
+    --------------------------------------------------
     */
 
-    const generation = finalData?.generations?.[0];
+    const generation =
+      finalData?.generations?.[0];
 
     if (!generation) {
       return res.status(500).json({
@@ -325,14 +361,21 @@ app.post("/api/generate-image", async (req, res) => {
     }
 
     /*
-      AI Horde आमतौर पर img URL देता है।
+    AI Horde generated image URL
     */
 
     if (generation.img) {
       try {
-        const imageResponse = await fetch(generation.img);
+        const imageResponse = await fetch(
+          generation.img
+        );
 
         if (!imageResponse.ok) {
+          /*
+          अगर backend image download नहीं कर पाया,
+          तो direct image URL भेज देंगे।
+          */
+
           return res.json({
             ok: true,
             image: generation.img,
@@ -340,25 +383,28 @@ app.post("/api/generate-image", async (req, res) => {
         }
 
         const contentType =
-          imageResponse.headers.get("content-type") || "image/png";
+          imageResponse.headers.get(
+            "content-type"
+          ) || "image/png";
 
         const imageBuffer = Buffer.from(
           await imageResponse.arrayBuffer()
         );
 
+        const base64Image =
+          imageBuffer.toString("base64");
+
         return res.json({
           ok: true,
-          image: `data:${contentType};base64,${imageBuffer.toString(
-            "base64"
-          )}`,
+
+          image:
+            `data:${contentType};base64,${base64Image}`,
         });
       } catch (downloadError) {
-        console.error("Image Download Error:", downloadError);
-
-        /*
-          अगर backend image download नहीं कर पाए,
-          तो direct URL frontend को दे देते हैं।
-        */
+        console.error(
+          "Image Download Error:",
+          downloadError
+        );
 
         return res.json({
           ok: true,
@@ -367,8 +413,38 @@ app.post("/api/generate-image", async (req, res) => {
       }
     }
 
+    /*
+    --------------------------------------------------
+    NO IMAGE
+    --------------------------------------------------
+    */
+
     return res.status(500).json({
       ok: false,
       error: "Generated image URL नहीं मिला।",
     });
+  } catch (error) {
+    console.error(
+      "Image Generation Error:",
+      error
+    );
+
+    return res.status(500).json({
+      ok: false,
+      error:
+        "Free Image AI server से connection नहीं हो पाया। थोड़ी देर बाद फिर कोशिश करें।",
+    });
   }
+});
+
+/*
+====================================================
+ SERVER START
+====================================================
+*/
+
+app.listen(PORT, () => {
+  console.log(
+    `Bolo AI Backend running on port ${PORT}`
+  );
+});

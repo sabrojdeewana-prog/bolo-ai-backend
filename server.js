@@ -27,7 +27,11 @@ app.use(
   })
 );
 
-app.use(express.json({ limit: "2mb" }));
+/*
+ Photo data URL बड़ा हो सकता है,
+ इसलिए JSON limit बढ़ाई गई है।
+*/
+app.use(express.json({ limit: "12mb" }));
 
 /*
 ====================================================
@@ -60,47 +64,66 @@ app.get("/api/health", (req, res) => {
 
 /*
 ====================================================
- CHAT - GROQ
+ CHAT + PHOTO VISION - GROQ
 ====================================================
 */
 
 app.post("/api/chat", async (req, res) => {
   try {
-    const message = String(req.body?.message || "").trim();
+    const message = String(
+      req.body?.message || ""
+    ).trim();
 
-    if (!message) {
+    const image = req.body?.image || null;
+
+    /*
+    --------------------------------------------------
+    VALIDATION
+    --------------------------------------------------
+    */
+
+    if (!message && !image) {
       return res.status(400).json({
         ok: false,
-        error: "Message खाली है।",
+        error: "Message या photo जरूरी है।",
       });
     }
 
-    const GROQ_API_KEY = process.env.GROQ_API_KEY;
+    const GROQ_API_KEY =
+      process.env.GROQ_API_KEY;
 
     if (!GROQ_API_KEY) {
       return res.status(500).json({
         ok: false,
-        error: "AI service अभी configure नहीं है।",
+        error:
+          "AI service अभी configure नहीं है।",
       });
     }
 
-    const response = await fetch(
-      "https://api.groq.com/openai/v1/chat/completions",
-      {
-        method: "POST",
+    /*
+    --------------------------------------------------
+    MODEL SELECTION
+    --------------------------------------------------
 
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${GROQ_API_KEY}`,
-        },
+    Photo है:
+    Vision model
 
-        body: JSON.stringify({
-          model: "openai/gpt-oss-20b",
+    Photo नहीं है:
+    Existing text model
+    --------------------------------------------------
+    */
 
-          messages: [
-            {
-              role: "system",
-              content: `
+    const model = image
+      ? "qwen/qwen3.6-27b"
+      : "openai/gpt-oss-20b";
+
+    /*
+    --------------------------------------------------
+    SYSTEM PROMPT
+    --------------------------------------------------
+    */
+
+    const systemMessage = `
 You are Bolo AI, a helpful, friendly and intelligent AI assistant.
 
 Your owner is Sabroj Babu.
@@ -114,28 +137,127 @@ Rules:
 - Be friendly and conversational.
 - Do not reveal API keys, passwords, server secrets or internal configuration.
 - If you do not know something, say so honestly.
-              `,
+
+When a photo is provided:
+- Actually analyse the image.
+- Describe what you can see.
+- Read visible text when possible.
+- Answer questions about objects, people, documents, screenshots and other visible content.
+- Do not claim that you cannot see the image.
+- If something is unclear or unreadable, say that honestly.
+`;
+
+    /*
+    --------------------------------------------------
+    MESSAGE PREPARATION
+    --------------------------------------------------
+    */
+
+    let userContent;
+
+    if (image) {
+      /*
+      Photo + text
+      */
+
+      userContent = [
+        {
+          type: "text",
+          text:
+            message ||
+            "Please analyse this photo and tell me what you can see.",
+        },
+        {
+          type: "image_url",
+          image_url: {
+            url: image,
+          },
+        },
+      ];
+    } else {
+      /*
+      Normal text chat
+      */
+
+      userContent = message;
+    }
+
+    /*
+    --------------------------------------------------
+    GROQ REQUEST
+    --------------------------------------------------
+    */
+
+    const response = await fetch(
+      "https://api.groq.com/openai/v1/chat/completions",
+      {
+        method: "POST",
+
+        headers: {
+          "Content-Type": "application/json",
+          Authorization:
+            `Bearer ${GROQ_API_KEY}`,
+        },
+
+        body: JSON.stringify({
+          model,
+
+          messages: [
+            {
+              role: "system",
+              content: systemMessage,
             },
 
             {
               role: "user",
-              content: message,
+              content: userContent,
             },
           ],
 
           temperature: 0.7,
-          max_tokens: 1000,
+
+          max_tokens: image
+            ? 1200
+            : 1000,
         }),
       }
     );
 
     const data = await response.json();
 
+    /*
+    --------------------------------------------------
+    GROQ ERROR HANDLING
+    --------------------------------------------------
+    */
+
     if (!response.ok) {
+      console.error(
+        "Groq Error:",
+        data
+      );
+
       if (response.status === 401) {
         return res.status(500).json({
           ok: false,
-          error: "AI API key गलत है।",
+          error:
+            "AI API key गलत है।",
+        });
+      }
+
+      if (response.status === 403) {
+        return res.status(403).json({
+          ok: false,
+          error:
+            "इस AI model की permission उपलब्ध नहीं है।",
+        });
+      }
+
+      if (response.status === 413) {
+        return res.status(413).json({
+          ok: false,
+          error:
+            "Photo बहुत बड़ी है। छोटी photo upload करें।",
         });
       }
 
@@ -143,17 +265,23 @@ Rules:
         return res.status(429).json({
           ok: false,
           error:
-            "AI की free limit अभी पूरी हो गई है। थोड़ी देर बाद फिर कोशिश करें।",
+            "AI की limit अभी पूरी हो गई है। थोड़ी देर बाद फिर कोशिश करें।",
         });
       }
 
-      console.error("Groq Error:", data);
-
       return res.status(500).json({
         ok: false,
-        error: "AI से response नहीं मिला।",
+        error:
+          data?.error?.message ||
+          "AI से response नहीं मिला।",
       });
     }
+
+    /*
+    --------------------------------------------------
+    GET AI RESPONSE
+    --------------------------------------------------
+    */
 
     const reply =
       data?.choices?.[0]?.message?.content?.trim();
@@ -161,20 +289,32 @@ Rules:
     if (!reply) {
       return res.status(500).json({
         ok: false,
-        error: "AI ने कोई जवाब नहीं दिया।",
+        error:
+          "AI ने कोई जवाब नहीं दिया।",
       });
     }
+
+    /*
+    --------------------------------------------------
+    SUCCESS
+    --------------------------------------------------
+    */
 
     return res.json({
       ok: true,
       reply,
+      vision: Boolean(image),
     });
   } catch (error) {
-    console.error("Chat Error:", error);
+    console.error(
+      "Chat Error:",
+      error
+    );
 
     return res.status(500).json({
       ok: false,
-      error: "AI server से connection नहीं हो पाया।",
+      error:
+        "AI server से connection नहीं हो पाया।",
     });
   }
 });
@@ -188,21 +328,24 @@ Rules:
 
 app.post("/api/generate-image", async (req, res) => {
   try {
-    const prompt = String(req.body?.prompt || "").trim();
+    const prompt = String(
+      req.body?.prompt || ""
+    ).trim();
 
     if (!prompt) {
       return res.status(400).json({
         ok: false,
-        error: "Image prompt खाली है।",
+        error:
+          "Image prompt खाली है।",
       });
     }
 
     /*
     AI Horde anonymous API key.
-    किसी personal image API key की जरूरत नहीं।
     */
 
-    const HORDE_API_KEY = "0000000000";
+    const HORDE_API_KEY =
+      "0000000000";
 
     /*
     --------------------------------------------------
@@ -216,13 +359,15 @@ app.post("/api/generate-image", async (req, res) => {
         method: "POST",
 
         headers: {
-          "Content-Type": "application/json",
+          "Content-Type":
+            "application/json",
           apikey: HORDE_API_KEY,
-          Accept: "application/json",
+          Accept:
+            "application/json",
         },
 
         body: JSON.stringify({
-          prompt: prompt,
+          prompt,
 
           params: {
             width: 512,
@@ -239,7 +384,8 @@ app.post("/api/generate-image", async (req, res) => {
       }
     );
 
-    const generateData = await generateResponse.json();
+    const generateData =
+      await generateResponse.json();
 
     console.log(
       "AI Horde Generate Response:",
@@ -252,7 +398,9 @@ app.post("/api/generate-image", async (req, res) => {
         generateData
       );
 
-      return res.status(generateResponse.status).json({
+      return res.status(
+        generateResponse.status
+      ).json({
         ok: false,
         error:
           generateData?.message ||
@@ -261,7 +409,8 @@ app.post("/api/generate-image", async (req, res) => {
       });
     }
 
-    const generationId = generateData?.id;
+    const generationId =
+      generateData?.id;
 
     if (!generationId) {
       return res.status(500).json({
@@ -271,24 +420,15 @@ app.post("/api/generate-image", async (req, res) => {
       });
     }
 
-    console.log(
-      "AI Horde Generation ID:",
-      generationId
-    );
-
     /*
     --------------------------------------------------
     STEP 2: CHECK GENERATION
     --------------------------------------------------
-
-    Official lightweight check endpoint.
-    इसमें image download नहीं होती।
     */
 
     const maxAttempts = 36;
 
     let isDone = false;
-
     let lastCheckData = null;
 
     for (
@@ -296,30 +436,31 @@ app.post("/api/generate-image", async (req, res) => {
       attempt < maxAttempts;
       attempt++
     ) {
-      /*
-      5 seconds wait
-      */
-
-      await new Promise((resolve) =>
-        setTimeout(resolve, 5000)
+      await new Promise(
+        (resolve) =>
+          setTimeout(resolve, 5000)
       );
 
-      const checkResponse = await fetch(
-        `https://stablehorde.net/api/v2/generate/check/${generationId}`,
-        {
-          method: "GET",
+      const checkResponse =
+        await fetch(
+          `https://stablehorde.net/api/v2/generate/check/${generationId}`,
+          {
+            method: "GET",
 
-          headers: {
-            apikey: HORDE_API_KEY,
-            Accept: "application/json",
-          },
-        }
-      );
+            headers: {
+              apikey:
+                HORDE_API_KEY,
+              Accept:
+                "application/json",
+            },
+          }
+        );
 
       const checkData =
         await checkResponse.json();
 
-      lastCheckData = checkData;
+      lastCheckData =
+        checkData;
 
       console.log(
         `AI Horde Check ${attempt + 1}:`,
@@ -327,11 +468,6 @@ app.post("/api/generate-image", async (req, res) => {
       );
 
       if (!checkResponse.ok) {
-        console.error(
-          "AI Horde Check Error:",
-          checkData
-        );
-
         return res.status(500).json({
           ok: false,
           error:
@@ -341,11 +477,9 @@ app.post("/api/generate-image", async (req, res) => {
         });
       }
 
-      /*
-      Generation complete
-      */
-
-      if (checkData?.done === true) {
+      if (
+        checkData?.done === true
+      ) {
         isDone = true;
         break;
       }
@@ -361,30 +495,32 @@ app.post("/api/generate-image", async (req, res) => {
       return res.status(504).json({
         ok: false,
         error:
-          "Image generation में ज्यादा समय लग रहा है। AI Horde अभी busy है, थोड़ी देर बाद फिर कोशिश करें।",
-        status: lastCheckData,
+          "Image generation में ज्यादा समय लग रहा है। थोड़ी देर बाद फिर कोशिश करें।",
+        status:
+          lastCheckData,
       });
     }
 
     /*
     --------------------------------------------------
-    STEP 4: GET FULL GENERATION STATUS
+    STEP 4: GET FINAL STATUS
     --------------------------------------------------
-
-    अब image सहित पूरा result लेते हैं।
     */
 
-    const statusResponse = await fetch(
-      `https://stablehorde.net/api/v2/generate/status/${generationId}`,
-      {
-        method: "GET",
+    const statusResponse =
+      await fetch(
+        `https://stablehorde.net/api/v2/generate/status/${generationId}`,
+        {
+          method: "GET",
 
-        headers: {
-          apikey: HORDE_API_KEY,
-          Accept: "application/json",
-        },
-      }
-    );
+          headers: {
+            apikey:
+              HORDE_API_KEY,
+            Accept:
+              "application/json",
+          },
+        }
+      );
 
     const statusData =
       await statusResponse.json();
@@ -406,7 +542,7 @@ app.post("/api/generate-image", async (req, res) => {
 
     /*
     --------------------------------------------------
-    STEP 5: GET IMAGE
+    STEP 5: GET GENERATION
     --------------------------------------------------
     */
 
@@ -436,14 +572,10 @@ app.post("/api/generate-image", async (req, res) => {
     */
 
     try {
-      const imageResponse = await fetch(
-        generation.img
-      );
-
-      /*
-      अगर image download नहीं हुई,
-      तो direct URL भेज देंगे।
-      */
+      const imageResponse =
+        await fetch(
+          generation.img
+        );
 
       if (!imageResponse.ok) {
         console.error(
@@ -453,7 +585,8 @@ app.post("/api/generate-image", async (req, res) => {
 
         return res.json({
           ok: true,
-          image: generation.img,
+          image:
+            generation.img,
         });
       }
 
@@ -462,18 +595,15 @@ app.post("/api/generate-image", async (req, res) => {
           "content-type"
         ) || "image/png";
 
-      const imageBuffer = Buffer.from(
-        await imageResponse.arrayBuffer()
-      );
+      const imageBuffer =
+        Buffer.from(
+          await imageResponse.arrayBuffer()
+        );
 
       const base64Image =
-        imageBuffer.toString("base64");
-
-      /*
-      ------------------------------------------------
-      FINAL SUCCESS
-      ------------------------------------------------
-      */
+        imageBuffer.toString(
+          "base64"
+        );
 
       return res.json({
         ok: true,
@@ -490,13 +620,10 @@ app.post("/api/generate-image", async (req, res) => {
         downloadError
       );
 
-      /*
-      Direct URL fallback
-      */
-
       return res.json({
         ok: true,
-        image: generation.img,
+        image:
+          generation.img,
       });
     }
   } catch (error) {
